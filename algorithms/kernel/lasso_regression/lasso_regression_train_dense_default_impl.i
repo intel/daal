@@ -141,41 +141,33 @@ services::Status TrainBatchKernel<algorithmFPType, method, cpu>::compute(
         xMeansPtr = xMeans.get();
         DAAL_CHECK_MALLOC(xMeansPtr);
 
-        for (size_t i = 0; i < nFeatures; ++i) xMeansPtr[i] = 0;
-
         const size_t blockSize = 256;
         size_t nBlocks         = nRows / blockSize;
         nBlocks += (nBlocks * blockSize != nRows);
 
         DAAL_OVERFLOW_CHECK_BY_MULTIPLICATION(size_t, nFeatures, sizeof(algorithmFPType));
 
-        TlsMem<algorithmFPType, cpu, services::internal::ScalableCalloc<algorithmFPType, cpu> > tlsData(nFeatures);
-        daal::threader_for(nBlocks, nBlocks, [&](const size_t iBlock) {
-            algorithmFPType * sum  = tlsData.local();
-            const size_t startRow  = iBlock * blockSize;
-            const size_t finishRow = (iBlock + 1 == nBlocks ? nRows : (iBlock + 1) * blockSize);
-            for (size_t i = startRow; i < finishRow; i++)
-            {
-                PRAGMA_IVDEP
-                PRAGMA_VECTOR_ALWAYS
-                for (size_t j = 0; j < nFeatures; j++)
-                {
-                    sum[j] += xPtr[i * nFeatures + j];
-                }
-            }
-        });
-        tlsData.reduce([&](algorithmFPType * localSum) {
-            PRAGMA_IVDEP
-            PRAGMA_VECTOR_ALWAYS
-            for (size_t j = 0; j < nFeatures; j++)
-            {
-                xMeansPtr[j] += localSum[j];
-            }
-        });
+        algorithmFPType * total =
+            daal::parallel_deterministic_sum<algorithmFPType, cpu>(nRows, blockSize, nFeatures, [&](void * local_, size_t begin, size_t end) {
+                algorithmFPType * local = static_cast<algorithmFPType *>(local_);
+                daal::services::internal::service_memset_seq<algorithmFPType, cpu>(local, 0, nFeatures);
 
+                for (size_t it = begin; it != end; ++it)
+                {
+                    PRAGMA_IVDEP
+                    PRAGMA_VECTOR_ALWAYS
+                    for (size_t j = 0; j < nFeatures; ++j)
+                    {
+                        local[j] += xPtr[it * nFeatures + j];
+                    }
+                }
+            });
+
+        PRAGMA_IVDEP
+        PRAGMA_VECTOR_ALWAYS
         for (size_t i = 0; i < nFeatures; ++i)
         {
-            xMeansPtr[i] *= inversedNRows;
+            xMeansPtr[i] = total[i] * inversedNRows;
         }
 
         daal::threader_for(nBlocks, nBlocks, [&](const size_t iBlock) {

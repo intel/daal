@@ -221,73 +221,50 @@ inline services::Status MSEKernel<algorithmFPType, method, cpu>::compute(Numeric
                         hessianDiagonal.reset(nTheta);
                         hessianDiagonalPtr           = hessianDiagonal.get();
                         algorithmFPType inverseNData = (algorithmFPType)(1.0) / nDataRows;
-
-                        PRAGMA_IVDEP
-                        PRAGMA_VECTOR_ALWAYS
-                        for (size_t j = 0; j < nTheta; j++)
-                        {
-                            hessianDiagonalPtr[j] = 0; /*USE DOTPRODUCT or parallel computation*/
-                        }
+                        algorithmFPType * total      = nullptr;
 
                         if (transposedData)
                         {
-                            TlsMem<algorithmFPType, cpu, services::internal::ScalableCalloc<algorithmFPType, cpu> > tlsData(nTheta);
-                            daal::threader_for(nBlocks, nBlocks, [&](const size_t iBlock) {
-                                algorithmFPType * hessianDiagonalLocal = tlsData.local();
-                                const size_t startRow                  = iBlock * blockSize;
-                                const size_t finishRow                 = (iBlock + 1 == nBlocks ? nDataRows : (iBlock + 1) * blockSize);
+                            total = daal::parallel_deterministic_sum<algorithmFPType, cpu>(
+                                nDataRows, blockSize, nTheta, [&](void * local_, size_t begin, size_t end) {
+                                    algorithmFPType * local = static_cast<algorithmFPType *>(local_);
+                                    daal::services::internal::service_memset_seq<algorithmFPType, cpu>(local, 0, nTheta);
 
-                                for (size_t j = 0; j < nTheta; j++)
-                                {
-                                    PRAGMA_IVDEP
-                                    PRAGMA_VECTOR_ALWAYS
-                                    for (size_t i = startRow; i < finishRow; i++)
+                                    for (size_t j = 0; j < nTheta; ++j)
                                     {
-                                        hessianDiagonalLocal[j] += X[j * n + i] * X[j * n + i]; /*USE DOTPRODUCT or parallel computation*/
+                                        PRAGMA_IVDEP
+                                        PRAGMA_VECTOR_ALWAYS
+                                        for (size_t i = begin; i < end; ++i)
+                                        {
+                                            local[j] += X[j * n + i] * X[j * n + i]; /*USE DOTPRODUCT or parallel computation*/
+                                        }
                                     }
-                                }
-                            });
-                            tlsData.reduce([&](algorithmFPType * localHes) {
-                                PRAGMA_IVDEP
-                                PRAGMA_VECTOR_ALWAYS
-                                for (size_t j = 0; j < nTheta; j++)
-                                {
-                                    hessianDiagonalPtr[j] += localHes[j];
-                                }
-                            });
+                                });
                         }
                         else
                         {
-                            TlsMem<algorithmFPType, cpu, services::internal::ScalableCalloc<algorithmFPType, cpu> > tlsData(nTheta);
-                            daal::threader_for(nBlocks, nBlocks, [&](const size_t iBlock) {
-                                algorithmFPType * hessianDiagonalLocal = tlsData.local();
-                                const size_t startRow                  = iBlock * blockSize;
-                                const size_t finishRow                 = (iBlock + 1 == nBlocks ? nDataRows : (iBlock + 1) * blockSize);
+                            total = daal::parallel_deterministic_sum<algorithmFPType, cpu>(
+                                nDataRows, blockSize, nTheta, [&](void * local_, size_t begin, size_t end) {
+                                    algorithmFPType * local = static_cast<algorithmFPType *>(local_);
+                                    daal::services::internal::service_memset_seq<algorithmFPType, cpu>(local, 0, nTheta);
 
-                                for (size_t i = startRow; i < finishRow; i++)
-                                {
-                                    PRAGMA_IVDEP
-                                    PRAGMA_VECTOR_ALWAYS
-                                    for (size_t j = 0; j < nTheta; j++)
+                                    for (size_t i = begin; i < end; ++i)
                                     {
-                                        hessianDiagonalLocal[j] += X[i * dim + j] * X[i * dim + j]; /*USE DOTPRODUCT or parallel computation*/
+                                        PRAGMA_IVDEP
+                                        PRAGMA_VECTOR_ALWAYS
+                                        for (size_t j = 0; j < nTheta; ++j)
+                                        {
+                                            local[j] += X[i * dim + j] * X[i * dim + j]; /*USE DOTPRODUCT or parallel computation*/
+                                        }
                                     }
-                                }
-                            });
-                            tlsData.reduce([&](algorithmFPType * localHes) {
-                                PRAGMA_IVDEP
-                                PRAGMA_VECTOR_ALWAYS
-                                for (size_t j = 0; j < nTheta; j++)
-                                {
-                                    hessianDiagonalPtr[j] += localHes[j];
-                                }
-                            });
+                                });
                         }
+
                         PRAGMA_IVDEP
                         PRAGMA_VECTOR_ALWAYS
                         for (size_t j = 0; j < nTheta; j++)
                         {
-                            hessianDiagonalPtr[j] *= inverseNData;
+                            hessianDiagonalPtr[j] = total[j] * inverseNData;
                         }
                     }
                 }
@@ -391,57 +368,53 @@ inline services::Status MSEKernel<algorithmFPType, method, cpu>::compute(Numeric
                     XY.reset(dim * yDim);
                     XYPtr = XY.get();
 
-                    PRAGMA_IVDEP
-                    PRAGMA_VECTOR_ALWAYS
-                    for (size_t i = 0; i < dim * yDim; i++) XYPtr[i] = 0;
-
-                    PRAGMA_IVDEP
-                    PRAGMA_VECTOR_ALWAYS
-                    for (size_t i = 0; i < dim * dim; i++) gramMatrixPtr[i] = 0;
                     char uplo = 'L';
 
                     const size_t blockSize = 256;
-                    DAAL_INT blockSizeDim  = (DAAL_INT)blockSize;
-                    size_t nBlocks         = nDataRows / blockSize;
-                    nBlocks += (nBlocks * blockSize != nDataRows);
-                    TlsMem<algorithmFPType, cpu, services::internal::ScalableCalloc<algorithmFPType, cpu> > tlsData(dim * yDim + (nTheta) * (nTheta));
-                    const size_t disp = dim * yDim;
-                    daal::threader_for(nBlocks, nBlocks, [&](const size_t iBlock) {
-                        algorithmFPType * localXY   = tlsData.local();
-                        algorithmFPType * localGram = localXY + disp;
-                        const size_t startRow       = iBlock * blockSize;
-                        DAAL_INT localBlockSizeDim  = (((iBlock + 1) == nBlocks) ? (nDataRows - startRow) : blockSizeDim);
+                    const size_t disp      = dim * yDim;
+                    const size_t len       = dim * yDim + nTheta * nTheta;
 
-                        if (transposedData)
-                        {
-                            daal::internal::Blas<algorithmFPType, cpu>::xxgemm(&notrans, &notrans, &yDim, &dim, &localBlockSizeDim, &one,
-                                                                               Y + startRow * yDim, &yDim, X + startRow, &n, &one, localXY, &yDim);
-                            Blas<algorithmFPType, cpu>::xxsyrk(&uplo, &trans, &dim, &localBlockSizeDim, &one, X + startRow, &n, &one, localGram,
-                                                               &dim);
-                        }
-                        else
-                        {
-                            daal::internal::Blas<algorithmFPType, cpu>::xxgemm(&notrans, &trans, &yDim, &dim, &localBlockSizeDim, &one,
-                                                                               Y + startRow * yDim, &yDim, X + startRow * dim, &dim, &one, localXY,
-                                                                               &yDim);
-                            Blas<algorithmFPType, cpu>::xxsyrk(&uplo, &notrans, &dim, &localBlockSizeDim, &one, X + startRow * dim, &dim, &one,
-                                                               localGram, &dim);
-                        }
-                    });
-                    tlsData.reduce([&](algorithmFPType * local) {
-                        PRAGMA_IVDEP
-                        PRAGMA_VECTOR_ALWAYS
-                        for (size_t j = 0; j < dim * yDim; j++)
-                        {
-                            XYPtr[j] += local[j];
-                        }
-                        PRAGMA_IVDEP
-                        PRAGMA_VECTOR_ALWAYS
-                        for (size_t j = 0; j < dim * dim; j++)
-                        {
-                            gramMatrixPtr[j] += local[j + disp];
-                        }
-                    });
+                    algorithmFPType * total = daal::parallel_deterministic_sum<algorithmFPType, cpu>(
+                        nDataRows, blockSize, len, [&](void * local, size_t begin, size_t end) {
+                            algorithmFPType * localXY = static_cast<algorithmFPType *>(local);
+                            daal::services::internal::service_memset_seq<algorithmFPType, cpu>(localXY, 0, len);
+
+                            algorithmFPType * localGram = localXY + disp;
+                            const size_t startRow       = begin;
+                            DAAL_INT localBlockSizeDim  = end - begin;
+
+                            if (transposedData)
+                            {
+                                daal::internal::Blas<algorithmFPType, cpu>::xxgemm(&notrans, &notrans, &yDim, &dim, &localBlockSizeDim, &one,
+                                                                                   Y + startRow * yDim, &yDim, X + startRow, &n, &one, localXY,
+                                                                                   &yDim);
+                                Blas<algorithmFPType, cpu>::xxsyrk(&uplo, &trans, &dim, &localBlockSizeDim, &one, X + startRow, &n, &one, localGram,
+                                                                   &dim);
+                            }
+                            else
+                            {
+                                daal::internal::Blas<algorithmFPType, cpu>::xxgemm(&notrans, &trans, &yDim, &dim, &localBlockSizeDim, &one,
+                                                                                   Y + startRow * yDim, &yDim, X + startRow * dim, &dim, &one,
+                                                                                   localXY, &yDim);
+                                Blas<algorithmFPType, cpu>::xxsyrk(&uplo, &notrans, &dim, &localBlockSizeDim, &one, X + startRow * dim, &dim, &one,
+                                                                   localGram, &dim);
+                            }
+                        });
+
+                    PRAGMA_IVDEP
+                    PRAGMA_VECTOR_ALWAYS
+                    for (int j = 0; j < dim * yDim; ++j)
+                    {
+                        XYPtr[j] = total[j];
+                    }
+
+                    PRAGMA_IVDEP
+                    PRAGMA_VECTOR_ALWAYS
+                    for (int j = 0; j < dim * dim; ++j)
+                    {
+                        gramMatrixPtr[j] = total[j + disp];
+                    }
+
                     const size_t dimension = dim;
                     for (size_t i = 0; i < dimension; i++)
                     {
