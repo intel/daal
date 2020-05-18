@@ -40,6 +40,7 @@ template <typename algorithmFPType>
 class DBSCANBatchKernelUCAPI : public Kernel
 {
 public:
+    DBSCANBatchKernelUCAPI();
     services::Status compute(const daal::data_management::NumericTable * ntData, const daal::data_management::NumericTable * ntWeights,
                              daal::data_management::NumericTable * ntAssignments, daal::data_management::NumericTable * ntNClusters,
                              daal::data_management::NumericTable * ntCoreIndices, daal::data_management::NumericTable * ntCoreObservations,
@@ -87,8 +88,8 @@ private:
 
     void calculateChunks(uint32_t nRows);
 
-    static const uint32_t _minSubgroupSize              = 16;
-    static const uint32_t _maxWorkgroupSize             = 256;
+    uint32_t _minSubgroupSize;
+    uint32_t _maxWorkgroupSize;
     static const uint32_t _minRecommendedNumberOfChunks = 64;
     static const uint32_t _recommendedChunkSize         = 256;
     static const uint32_t _minChunkSize                 = 16;
