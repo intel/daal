@@ -59,7 +59,6 @@ struct MKLPotrf
         cl::sycl::buffer<int64_t, 1> info(cl::sycl::range<1>(1));
 
         fpk::lapack::potrf(_queue, uplomkl, n, a_sycl_buff, lda, info);
-
         _queue.wait();
         /** TODO: Check info buffer for containing errors. Now it is not supported.:
          *  https://software.intel.com/en-us/oneapi-mkl-dpcpp-developer-reference-potrf
@@ -91,11 +90,65 @@ struct MKLPotrs
 
         cl::sycl::buffer<int64_t, 1> info(cl::sycl::range<1>(1));
         fpk::lapack::potrs(_queue, uplomkl, n, ny, a_sycl_buff, lda, b_sycl_buff, ldb, info);
-
         _queue.wait();
         /** TODO: Check info buffer for containing errors. Now it is not supported.:
          *  https://software.intel.com/en-us/oneapi-mkl-dpcpp-developer-reference-potrs
         */
+        return status;
+    }
+
+private:
+    cl::sycl::queue & _queue;
+};
+
+/**
+ *  <a name="DAAL-CLASS-ONEAPI-INTERNAL__MKLXSYEVD></a>
+ *  \brief Adapter for MKL XSYEVD routine
+ */
+template <typename algorithmFPType>
+struct MKLXsyevd
+{
+    MKLXsyevd(cl::sycl::queue & queue) : _queue(queue) {}
+
+    services::Status operator()(const math::Job jobz, const math::UpLo uplo, const int64_t n, services::Buffer<algorithmFPType> & a,
+                                const int64_t lda, services::Buffer<algorithmFPType> & w, services::Buffer<algorithmFPType> & work,
+                                const int64_t lwork, services::Buffer<int64_t> & iwork, const int64_t liwork)
+    {
+        services::Status status;
+
+        fpk::uplo uplomkl;
+        switch (uplo)
+        {
+        case math::UpLo::Upper: uplomkl = fpk::uplo::upper; break;
+        case math::UpLo::Lower: uplomkl = fpk::uplo::lower; break;
+
+        default: status.add(services::UnknownError); break;
+        }
+        DAAL_CHECK_STATUS_VAR(status);
+
+        fpk::job jobmkl;
+        switch (jobz)
+        {
+        case math::Job::novec: jobmkl = fpk::job::novec; break;
+        case math::Job::vec: jobmkl = fpk::job::vec; break;
+        case math::Job::updatevec: jobmkl = fpk::job::updatevec; break;
+        case math::Job::allvec: jobmkl = fpk::job::allvec; break;
+        case math::Job::somevec: jobmkl = fpk::job::somevec; break;
+        case math::Job::overwritevec: jobmkl = fpk::job::overwritevec; break;
+
+        default: status.add(services::UnknownError); break;
+        }
+        DAAL_CHECK_STATUS_VAR(status);
+
+        cl::sycl::buffer<algorithmFPType, 1> a_sycl_buff    = a.toSycl();
+        cl::sycl::buffer<algorithmFPType, 1> w_sycl_buff    = w.toSycl();
+        cl::sycl::buffer<algorithmFPType, 1> work_sycl_buff = work.toSycl();
+        cl::sycl::buffer<int64_t, 1> iwork_sycl_buff        = iwork.toSycl();
+
+        cl::sycl::buffer<int64_t, 1> info(cl::sycl::range<1>(1));
+        fpk::lapack::syevd(_queue, jobmkl, uplomkl, n, a_sycl_buff, lda, w_sycl_buff, work_sycl_buff, lwork, iwork_sycl_buff, liwork, info);
+        DAAL_CHECK(info.get_access<cl::sycl::access::mode::read>()[0] == 0, services::ErrorID::ErrorNormEqSystemSolutionFailed);
+        _queue.wait();
         return status;
     }
 
@@ -109,6 +162,7 @@ private:
 
 using interface1::MKLPotrf;
 using interface1::MKLPotrs;
+using interface1::MKLXsyevd;
 
 } // namespace math
 } // namespace internal
