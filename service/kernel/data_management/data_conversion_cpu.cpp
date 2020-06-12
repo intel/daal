@@ -40,15 +40,54 @@ void vectorCopyInternal<float>(const size_t nrows, const size_t ncols, void * ds
     float const * pmin   = static_cast<float const *>(ptrMin);
     char const * ptrByte = static_cast<char const *>(ptrMin);
 
-    const size_t nColSize = ncols - ncols % 8;
+    const size_t nColSize     = ncols - ncols % 8;
+    const size_t colBlockSize = 16;
+    size_t colBlockNum        = ncols / colBlockSize + !!(ncols % colBlockSize);
+
+    const size_t rowBlockSize = 256;
+    const size_t rowBlockNum  = nrows / rowBlockSize + !!(nrows % rowBlockSize);
+
+    size_t lastBlockNCols = colBlockSize;
+    if (ncols % colBlockSize)
+    {
+        const size_t newLastBlockNCols = 8 * ((ncols % colBlockSize) / 8);
+        if (newLastBlockNCols > 0)
+        {
+            lastBlockNCols = newLastBlockNCols;
+        }
+        else
+        {
+            --colBlockNum;
+        }
+    }
+
+    for (size_t iBlock = 0; iBlock < rowBlockNum; ++iBlock)
+    {
+        const size_t startRow  = iBlock * rowBlockSize;
+        const size_t finishRow = (iBlock + 1 != rowBlockNum) ? startRow + rowBlockSize : nrows;
+
+        for (size_t jBlock = 0; jBlock < colBlockNum; ++jBlock)
+        {
+            const size_t startCol     = jBlock * colBlockSize;
+            const size_t finishCol    = startCol + (jBlock + 1 != colBlockNum) ? colBlockSize : lastBlockNCols;
+            const size_t nextStartCol = (jBlock + 1 != colBlockNum) ? finishCol : 0;
+
+            for (size_t i = startRow; i < finishRow; ++i)
+            {
+                for (size_t j = startCol; j < finishCol; j += 8)
+                {
+                    __m256 ps = _mm512_i64gather_ps(*((__m512i *)&arrOffsets[j]), pmin + i, 1);
+                    _mm256_storeu_ps(pd + i * ncols + j, ps);
+                }
+
+                const size_t iPrefetched = i + rowBlockSize * static_cast<size_t>(jBlock + 1 == colBlockNum);
+                DAAL_PREFETCH_READ_T0(pd + iPrefetched * ncols + nextStartCol);
+            }
+        }
+    }
 
     for (size_t i = 0; i < nrows; ++i)
     {
-        for (size_t j = 0; j < nColSize; j += 8)
-        {
-            __m256 ps = _mm512_i64gather_ps(*((__m512i *)&arrOffsets[j]), pmin + i, 1);
-            _mm256_storeu_ps(pd + i * ncols + j, ps);
-        }
         for (size_t j = nColSize; j < ncols; ++j)
         {
             char const * pc   = ptrByte + arrOffsets[j];
@@ -64,15 +103,54 @@ void vectorCopyInternal<double>(const size_t nrows, const size_t ncols, void * d
     double const * pmin  = static_cast<double const *>(ptrMin);
     char const * ptrByte = static_cast<char const *>(ptrMin);
 
-    const size_t nColSize = ncols - ncols % 8;
+    const size_t nColSize     = ncols - ncols % 8;
+    const size_t colBlockSize = 8;
+    size_t colBlockNum        = ncols / colBlockSize + !!(ncols % colBlockSize);
+
+    const size_t rowBlockSize = 256;
+    const size_t rowBlockNum  = nrows / rowBlockSize + !!(nrows % rowBlockSize);
+
+    size_t lastBlockNCols = colBlockSize;
+    if (ncols % colBlockSize)
+    {
+        const size_t newLastBlockNCols = 8 * ((ncols % colBlockSize) / 8);
+        if (newLastBlockNCols > 0)
+        {
+            lastBlockNCols = newLastBlockNCols;
+        }
+        else
+        {
+            --colBlockNum;
+        }
+    }
+
+    for (size_t iBlock = 0; iBlock < rowBlockNum; ++iBlock)
+    {
+        const size_t startRow  = iBlock * rowBlockSize;
+        const size_t finishRow = (iBlock + 1 != rowBlockNum) ? startRow + rowBlockSize : nrows;
+
+        for (size_t jBlock = 0; jBlock < colBlockNum; ++jBlock)
+        {
+            const size_t startCol     = jBlock * colBlockSize;
+            const size_t finishCol    = startCol + (jBlock + 1 != colBlockNum) ? colBlockSize : lastBlockNCols;
+            const size_t nextStartCol = (jBlock + 1 != colBlockNum) ? finishCol : 0;
+
+            for (size_t i = startRow; i < finishRow; ++i)
+            {
+                for (size_t j = startCol; j < finishCol; j += 8)
+                {
+                    __m512d p = _mm512_i64gather_pd(*((__m512i *)&arrOffsets[j]), pmin + i, 1);
+                    _mm512_storeu_pd(pd + i * ncols + j, p);
+                }
+
+                const size_t iPrefetched = i + rowBlockSize * static_cast<size_t>(jBlock + 1 == colBlockNum);
+                DAAL_PREFETCH_READ_T0(pd + iPrefetched * ncols + nextStartCol);
+            }
+        }
+    }
 
     for (size_t i = 0; i < nrows; ++i)
     {
-        for (size_t j = 0; j < nColSize; j += 8)
-        {
-            __m512d p = _mm512_i64gather_pd(*((__m512i *)&arrOffsets[j]), pmin + i, 1);
-            _mm512_storeu_pd(pd + i * ncols + j, p);
-        }
         for (size_t j = nColSize; j < ncols; ++j)
         {
             char const * pc   = ptrByte + arrOffsets[j];
