@@ -129,10 +129,16 @@ public:
     {
         _st = services::Status();
 
-        auto buffer    = _src.template get<DataType>();
-        auto subbuffer = buffer.getSubBuffer(_offset, _size);
-
-        _dest = subbuffer;
+        auto buffer = _src.template get<DataType>();
+        if ((_offset == 0) && (_size == buffer.size()))
+        {
+            _dest = buffer;
+        }
+        else
+        {
+            auto subbuffer = buffer.getSubBuffer(_offset, _size);
+            _dest          = subbuffer;
+        }
     }
 
 private:
