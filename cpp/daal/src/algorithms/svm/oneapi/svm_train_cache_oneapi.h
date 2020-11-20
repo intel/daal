@@ -142,14 +142,10 @@ public:
         services::internal::Buffer<uint32_t> wsIndicesReal = wsIndices;
         if (_ifComputeSubKernel)
         {
-            // SubBuffer in not working on L0 (Date: 20200423).
-            // So workaround is set offset _nSelectRows in kernel copyDataByIndices
-            // Uncomment this code after fix
-
-            // blockSize = _blockSize / 2;
-            // wsIndicesReal = wsIndices.getSubBuffer(_nSelectRows, blockSize, &status);
-            // DAAL_CHECK_STATUS_VAR(status);
-            // DAAL_CHECK_STATUS(status, initSubKernel(blockSize, xTable));
+            blockSize     = _blockSize / 2;
+            wsIndicesReal = wsIndices.getSubBuffer(_nSelectRows, blockSize, status);
+            DAAL_CHECK_STATUS_VAR(status);
+            DAAL_CHECK_STATUS(status, initSubKernel(blockSize, xTable));
         }
 
         DAAL_CHECK_STATUS(status, Helper::copyDataByIndices(xBuff, wsIndicesReal, _xBlockBuff, blockSize, p));
@@ -213,7 +209,7 @@ protected:
     {
         services::Status status;
         DAAL_OVERFLOW_CHECK_BY_MULTIPLICATION(size_t, _lineSize, blockSize);
-        auto cacheHalf  = _cacheBuff.getSubBuffer(_lineSize * _nSelectRows, _lineSize * blockSize, &status);
+        auto cacheHalf  = _cacheBuff.getSubBuffer(_lineSize * _nSelectRows, _lineSize * blockSize, status);
         auto cacheTable = SyclHomogenNumericTable<algorithmFPType>::create(cacheHalf, _lineSize, blockSize, &status);
 
         const size_t p = xTable->getNumberOfColumns();
