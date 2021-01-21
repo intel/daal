@@ -61,20 +61,29 @@ void convert_to_csr_impl(const edge_list<vertex_type<Graph>> &edges, Graph &g) {
     }
 
     using vertex_t = typename graph_traits<Graph>::vertex_type;
+    using vertex_set = typename graph_traits<Graph>::vertex_set;
     using vertex_size_type = typename graph_traits<Graph>::vertex_size_type;
     using edge_t = typename graph_traits<Graph>::edge_type;
-    using vertex_set = typename graph_traits<Graph>::vertex_set;
     using edge_set = typename graph_traits<Graph>::edge_set;
+    using edge_size_type = typename graph_traits<Graph>::edge_size_type;
     using atomic_vertex_t = typename daal::services::Atomic<vertex_t>;
     using atomic_edge_t = typename daal::services::Atomic<edge_t>;
 
     using namespace oneapi::dal::detail;
 
-    vertex_t max_id = edges[0].first;
-    for (auto u : edges) {
-        vertex_t edge_max = std::max(u.first, u.second);
-        max_id = std::max(max_id, edge_max);
-    }
+    vertex_t max_id = parallel_reduce(
+        edges.size(),
+        -1,
+        [&](edge_size_type start_u, edge_size_type end_u, vertex_t max_for_reduce) -> vertex_t {
+            for (auto u = start_u; u != end_u; ++u) {
+                const vertex_t max_id_in_edge = std::max(edges[u].first, edges[u].second);
+                max_for_reduce = std::max(max_for_reduce, max_id_in_edge);
+            }
+            return max_for_reduce;
+        },
+        [&](vertex_t x, vertex_t y) -> vertex_t {
+            return std::max(x, y);
+        });
 
     if (max_id < 0) {
         throw invalid_argument(dal::detail::error_messages::negative_vertex_id());
