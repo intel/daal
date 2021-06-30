@@ -16,37 +16,43 @@
 
 #pragma once
 
-#ifndef ONEDAL_DATA_PARALLEL
-#error ONEDAL_DATA_PARALLEL must be defined to include this file
-#endif
-
-#include <stdexcept> // TODO: change by onedal exceptions
 #include "oneapi/dal/backend/dispatcher.hpp"
 
 namespace oneapi::dal::backend {
 
+#ifdef ONEDAL_DATA_PARALLEL
 class context_gpu : public base {
 public:
-    explicit context_gpu(const detail::data_parallel_policy& policy) : queue_(policy.get_queue()) {}
+    explicit context_gpu(const detail::data_parallel_policy& policy) : local_policy_(policy) {}
 
-    context_gpu(const context_gpu&) = delete;
-    context_gpu& operator=(const context_gpu&) = delete;
+    explicit context_gpu(const detail::spmd_data_parallel_policy& policy)
+            : local_policy_(policy.get_local()),
+              comm_(policy.get_communicator()) {}
 
     sycl::queue& get_queue() const {
-        return queue_;
+        return local_policy_.get_queue();
+    }
+
+    const detail::spmd_communicator& get_communicator() const {
+        return comm_;
     }
 
 private:
-    sycl::queue& queue_;
+    detail::data_parallel_policy local_policy_;
+    detail::spmd_communicator comm_;
 };
+#endif
 
+#ifdef ONEDAL_DATA_PARALLEL
 template <typename CpuKernel, typename GpuKernel>
 struct kernel_dispatcher<CpuKernel, GpuKernel> {
-    template <typename... Args>
-    auto operator()(const detail::data_parallel_policy& policy, Args&&... args) const {
+    template <typename Policy, typename... Args>
+    auto operator()(const Policy& policy, Args&&... args) const {
+        static_assert(detail::is_data_parallel_policy_v<Policy>);
+
         const auto device = policy.get_queue().get_device();
         if (device.is_host() || device.is_cpu()) {
-            const auto cpu_policy = context_cpu{ detail::host_policy::get_default() };
+            const auto cpu_policy = context_cpu{ policy.to_host() };
             return CpuKernel()(cpu_policy, std::forward<Args>(args)...);
         }
         else if (device.is_gpu()) {
@@ -58,5 +64,6 @@ struct kernel_dispatcher<CpuKernel, GpuKernel> {
         }
     }
 };
+#endif
 
 } // namespace oneapi::dal::backend

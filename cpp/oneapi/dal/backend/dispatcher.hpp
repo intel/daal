@@ -18,6 +18,7 @@
 
 #include "oneapi/dal/detail/policy.hpp"
 #include "oneapi/dal/backend/common.hpp"
+#include "oneapi/dal/backend/communicator.hpp"
 #include "oneapi/dal/backend/dispatcher_cpu.hpp"
 
 namespace oneapi::dal::backend {
@@ -46,25 +47,93 @@ struct kernel_dispatcher {};
 
 class context_cpu {
 public:
-    explicit context_cpu(const detail::host_policy& ctx = detail::host_policy::get_default())
-            : cpu_extensions_(ctx.get_enabled_cpu_extensions()) {
+    explicit context_cpu(const detail::host_policy& policy = detail::host_policy::get_default())
+            : local_policy_(policy) {
+        global_init();
+    }
+
+    explicit context_cpu(const detail::spmd_host_policy& policy)
+            : local_policy_(policy.get_local()),
+              comm_(policy.get_communicator()) {
         global_init();
     }
 
     detail::cpu_extension get_enabled_cpu_extensions() const {
-        return cpu_extensions_;
+        return local_policy_.get_enabled_cpu_extensions();
+    }
+
+    const spmd_communicator& get_communicator() const {
+        return comm_;
     }
 
 private:
     void global_init();
-    detail::cpu_extension cpu_extensions_;
+
+    detail::host_policy local_policy_;
+    spmd_communicator comm_;
 };
 
-template <typename CpuKernel>
-struct kernel_dispatcher<CpuKernel> {
+template <typename Kernel>
+struct local_cpu_kernel {
+    using kernel_t = Kernel;
+};
+
+template <typename Kernel>
+struct spmd_cpu_kernel {
+    using kernel_t = Kernel;
+};
+
+/// Specialization of dispatcher needed for backward compatibility
+template <typename K>
+struct kernel_dispatcher<K> {
     template <typename... Args>
-    auto operator()(const detail::host_policy& ctx, Args&&... args) const {
-        return CpuKernel()(context_cpu{ ctx }, std::forward<Args>(args)...);
+    auto operator()(const detail::host_policy& policy, Args&&... args) const {
+        return K{}(context_cpu{ policy }, std::forward<Args>(args)...);
+    }
+};
+
+/// Covers the case when there is only single-node CPU kernel.
+template <typename K>
+struct kernel_dispatcher<local_cpu_kernel<K>> {
+    template <typename... Args>
+    auto operator()(const detail::host_policy& policy, Args&&... args) const {
+        return K{}(context_cpu{ policy }, std::forward<Args>(args)...);
+    }
+
+    template <typename... Args>
+    auto operator()(const detail::spmd_host_policy& policy, Args&&... args) const {
+        // TODO: Move error message to `error_messages`
+        throw unimplemented{ "Distributed version of algorithm is not implemented for CPU" };
+    }
+};
+
+/// Covers the case when there is an universal SPMD CPU kernel that
+/// can be used for both single-node and distributed computations.
+template <typename K>
+struct kernel_dispatcher<spmd_cpu_kernel<K>> {
+    template <typename... Args>
+    auto operator()(const detail::host_policy& policy, Args&&... args) const {
+        // TODO: Create `context_cpu` with "empty" communicator and call kernel
+    }
+
+    template <typename... Args>
+    auto operator()(const detail::spmd_host_policy& policy, Args&&... args) const {
+        return K{}(context_cpu{ policy }, std::forward<Args>(args)...);
+    }
+};
+
+/// Covers the case when there are two distinct CPU kernels
+/// for single-node and distributed computations.
+template <typename K1, typename K2>
+struct kernel_dispatcher<local_cpu_kernel<K1>, spmd_cpu_kernel<K2>> {
+    template <typename... Args>
+    auto operator()(const detail::host_policy& policy, Args&&... args) const {
+        return K1{}(context_cpu{ policy }, std::forward<Args>(args)...);
+    }
+
+    template <typename... Args>
+    auto operator()(const detail::spmd_host_policy& policy, Args&&... args) const {
+        return K2{}(context_cpu{ policy }, std::forward<Args>(args)...);
     }
 };
 

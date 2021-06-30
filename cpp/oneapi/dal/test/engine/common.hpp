@@ -112,6 +112,34 @@
 
 namespace oneapi::dal::test::engine {
 
+template <typename T>
+struct type2str {
+    static const char* name() {
+        return "Unknown";
+    }
+};
+
+#define SPECIALIZE_TYPE2STR(T)      \
+    template <>                     \
+    struct type2str<T> {            \
+        static const char* name() { \
+            return #T;              \
+        }                           \
+    };
+
+SPECIALIZE_TYPE2STR(float)
+SPECIALIZE_TYPE2STR(double)
+SPECIALIZE_TYPE2STR(std::uint8_t)
+SPECIALIZE_TYPE2STR(std::uint16_t)
+SPECIALIZE_TYPE2STR(std::uint32_t)
+SPECIALIZE_TYPE2STR(std::uint64_t)
+SPECIALIZE_TYPE2STR(std::int8_t)
+SPECIALIZE_TYPE2STR(std::int16_t)
+SPECIALIZE_TYPE2STR(std::int32_t)
+SPECIALIZE_TYPE2STR(std::int64_t)
+
+#undef SPECIALIZE_TYPE2STR
+
 class host_test_policy {
 public:
     bool is_cpu() const {
@@ -133,13 +161,37 @@ inline auto train(host_test_policy& policy, Args&&... args) {
 }
 
 template <typename... Args>
+inline auto spmd_train(host_test_policy& policy,
+                       const dal::detail::spmd_communicator& comm,
+                       Args&&... args) {
+    return dal::train(dal::detail::spmd_policy{ dal::detail::host_policy{}, comm },
+                      std::forward<Args>(args)...);
+}
+
+template <typename... Args>
 inline auto infer(host_test_policy& policy, Args&&... args) {
     return dal::infer(std::forward<Args>(args)...);
 }
 
 template <typename... Args>
+inline auto spmd_infer(host_test_policy& policy,
+                       const dal::detail::spmd_communicator& comm,
+                       Args&&... args) {
+    return dal::infer(dal::detail::spmd_policy{ dal::detail::host_policy{}, comm },
+                      std::forward<Args>(args)...);
+}
+
+template <typename... Args>
 inline auto compute(host_test_policy& policy, Args&&... args) {
     return dal::compute(std::forward<Args>(args)...);
+}
+
+template <typename... Args>
+inline auto spmd_compute(host_test_policy& policy,
+                         const dal::detail::spmd_communicator& comm,
+                         Args&&... args) {
+    return dal::compute(dal::detail::spmd_policy{ dal::detail::host_policy{}, comm },
+                        std::forward<Args>(args)...);
 }
 
 #ifdef ONEDAL_DATA_PARALLEL
@@ -202,6 +254,15 @@ inline auto train(device_test_policy& policy, Args&&... args) {
 }
 
 template <typename... Args>
+inline auto spmd_train(device_test_policy& policy,
+                       const dal::detail::spmd_communicator& comm,
+                       Args&&... args) {
+    dal::detail::data_parallel_policy local_policy{ policy.get_queue() };
+    dal::detail::spmd_policy spmd_policy{ local_policy, comm };
+    return dal::train(spmd_policy, std::forward<Args>(args)...);
+}
+
+template <typename... Args>
 inline auto infer(device_test_policy& policy, Args&&... args) {
     return dal::infer(policy.get_queue(), std::forward<Args>(args)...);
 }
@@ -210,19 +271,6 @@ template <typename... Args>
 inline auto compute(device_test_policy& policy, Args&&... args) {
     return dal::compute(policy.get_queue(), std::forward<Args>(args)...);
 }
-
-template <typename T>
-struct type2str {
-    static const char* name() {
-        return "Unknown";
-    }
-};
-
-#define INSTANTIATE_TYPE_MAP(T)       \
-    template <>                       \
-    const char* type2str<T>::name() { \
-        return #T;                    \
-    }
 
 #endif
 
