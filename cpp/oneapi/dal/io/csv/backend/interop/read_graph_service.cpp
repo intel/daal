@@ -14,21 +14,17 @@
 * limitations under the License.
 *******************************************************************************/
 
-#pragma once
+#include "oneapi/dal/io/csv/detail/read_graph_service.hpp"
+#include "src/externals/service_service.h"
 
-#include <string>
+namespace oneapi::dal::preview::read_graph::detail {
 
-namespace oneapi::dal::preview {
+ONEDAL_EXPORT std::int32_t daal_string_to_int(const char* nptr, char** endptr) {
+    return daal::internal::Service<>::serv_string_to_int(nptr, endptr);
+}
 
-class ONEDAL_EXPORT graph_csv_data_source {
-public:
-    graph_csv_data_source(std::string filename) : _file_name(filename) {}
-    std::string get_filename() const {
-        return _file_name;
-    }
+ONEDAL_EXPORT double daal_string_to_double(const char* nptr, char** endptr) {
+    return daal::internal::Service<>::serv_string_to_double(nptr, endptr);
+}
 
-private:
-    std::string _file_name;
-};
-
-} // namespace oneapi::dal::preview
+} // namespace oneapi::dal::preview::read_graph::detail

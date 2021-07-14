@@ -16,25 +16,18 @@
 
 #pragma once
 
-#include "oneapi/dal/detail/common.hpp"
+#include "oneapi/dal/io/csv/common.hpp"
+#include "oneapi/dal/io/csv/detail/read_graph_kernel_impl.hpp"
 
-namespace oneapi::dal::preview::load_graph::detail {
+namespace oneapi::dal::csv::detail {
 
-ONEDAL_EXPORT std::int32_t daal_string_to_int(const char *nptr, char **endptr);
-
-ONEDAL_EXPORT double daal_string_to_double(const char *nptr, char **endptr);
-
-template <typename T>
-inline T daal_string_to(const char *nptr, char **endptr);
-
-template <>
-inline std::int32_t daal_string_to(const char *nptr, char **endptr) {
-    return daal_string_to_int(nptr, endptr);
+template <typename Descriptor>
+inline typename Descriptor::object_t read_graph_default_kernel(const dal::detail::host_policy& ctx,
+                                                               const detail::data_source_base& ds,
+                                                               const Descriptor& desc) {
+    using object_t = typename Descriptor::object_t;
+    object_t graph;
+    oneapi::dal::preview::read_graph::detail::read_impl(ds, desc, graph);
+    return graph;
 }
-
-template <>
-inline double daal_string_to(const char *nptr, char **endptr) {
-    return daal_string_to_double(nptr, endptr);
-}
-
-} // namespace oneapi::dal::preview::load_graph::detail
+} // namespace oneapi::dal::csv::detail
